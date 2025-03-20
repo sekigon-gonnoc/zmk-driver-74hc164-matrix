@@ -1,0 +1,76 @@
+description: 74HC164 shift register matrix keyboard kscan controller
+
+compatible: "zmk,kscan-74hc164-matrix"
+
+include: kscan.yaml
+
+properties:
+  data-gpios:
+    type: phandle-array
+    required: true
+    description: GPIO for the data pin of the 74HC164 shift register
+
+  clk-gpios:
+    type: phandle-array
+    required: true
+    description: GPIO for the clock pin of the 74HC164 shift register
+
+  reset-gpios:
+    type: phandle-array
+    required: true
+    description: GPIO for the reset pin of the 74HC164 shift register
+
+  power-gpios:
+    type: phandle-array
+    required: true
+    description: GPIO for the power control pin
+
+  row-gpios:
+    type: phandle-array
+    required: true
+    description: GPIOs for row scanning of the matrix
+
+  rows:
+    type: int
+    required: true
+    description: Number of rows in the matrix
+
+  columns:
+    type: int
+    required: true
+    description: Number of columns in the matrix
+
+  debounce-period:
+    type: int
+    default: 10
+    description: |
+      Debounce period in milliseconds (deprecated, use debounce-press-ms
+      and debounce-release-ms instead)
+
+  debounce-press-ms:
+    type: int
+    description: Debounce time for key press in milliseconds
+
+  debounce-release-ms:
+    type: int
+    description: Debounce time for key release in milliseconds
+
+  debounce-scan-period-ms:
+    type: int
+    default: 1
+    description: |
+      Time between matrix scans while debouncing in milliseconds.
+      This is also used for the scan rate when keys are pressed.
+
+  poll-period-ms:
+    type: int
+    default: 10
+    description: |
+      Time between matrix scans when no keys are pressed in milliseconds.
+      Higher values will reduce power consumption.
+
+  wakeup-source:
+    type: boolean
+    description: |
+      If enabled, the matrix scan can be used as a wakeup source for the system.
+      This is useful for low-power operation.
