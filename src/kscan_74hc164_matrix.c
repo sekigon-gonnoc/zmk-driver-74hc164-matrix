@@ -47,7 +47,8 @@ struct kscan_74hc164_config {
     struct gpio_dt_spec data_gpio;
     struct gpio_dt_spec clk_gpio;
     struct gpio_dt_spec reset_gpio;
-    struct gpio_dt_spec power_gpio;
+    struct gpio_dt_spec *power_gpios;
+    size_t power_gpio_count;
     struct gpio_dt_spec *row_gpios;
     uint8_t row_count;
     uint8_t col_count;
@@ -106,13 +107,25 @@ static void kscan_74hc164_init_shift_register(const struct device *dev) {
     gpio_pin_set_dt(&config->data_gpio, 1);
 }
 
+static int kscan_74hc164_power_control(const struct device *dev, int value) {
+    const struct kscan_74hc164_config *config = dev->config;
+    int err;
+
+    // Set all power GPIOs to the specified value
+    for (int i = 0; i < config->power_gpio_count; i++) {
+        err = gpio_pin_set_dt(&config->power_gpios[i], value);
+        if (err) {
+            LOG_ERR("Failed to set power GPIO %d: %d", i, err);
+            return err;
+        }
+    }
+    
+    return 0;
+}
+
 static int kscan_74hc164_matrix_read(const struct device *dev) {
     const struct kscan_74hc164_config *config = dev->config;
     struct kscan_74hc164_data *data = dev->data;
-    
-    // Power on the matrix
-    gpio_pin_set_dt(&config->power_gpio, 1);
-    k_busy_wait(10);  // Give power time to stabilize
     
     // Initialize the shift register with all inactive columns
     kscan_74hc164_init_shift_register(dev);
@@ -219,26 +232,16 @@ static int kscan_74hc164_interrupt_enable(const struct device *dev) {
         k_busy_wait(1);
     }
     
-    // Power on the matrix to enable interrupts - do this AFTER setting up the shift register
-    gpio_pin_set_dt(&config->power_gpio, 1);
-    
     return 0;
 }
 
 static int kscan_74hc164_interrupt_disable(const struct device *dev) {
-    const struct kscan_74hc164_config *config = dev->config;
     int err;
     
     // First disable interrupts on all rows
     err = kscan_74hc164_interrupt_configure(dev, GPIO_INT_DISABLE);
-    if (err) {
-        return err;
-    }
-    
-    // Power off the matrix to save power
-    gpio_pin_set_dt(&config->power_gpio, 0);
-    
-    return 0;
+
+    return err;
 }
 
 static void kscan_74hc164_irq_callback_handler(const struct device *port, struct gpio_callback *cb,
@@ -318,18 +321,29 @@ static int kscan_74hc164_init(const struct device *dev) {
     // Initialize GPIOs for shift register control first
     if (!gpio_is_ready_dt(&config->data_gpio) ||
         !gpio_is_ready_dt(&config->clk_gpio) ||
-        !gpio_is_ready_dt(&config->reset_gpio) ||
-        !gpio_is_ready_dt(&config->power_gpio)) {
+        !gpio_is_ready_dt(&config->reset_gpio)) {
         LOG_ERR("Control GPIOs not ready");
         return -ENODEV;
     }
 
     if (gpio_pin_configure_dt(&config->data_gpio, GPIO_OUTPUT_INACTIVE) ||
         gpio_pin_configure_dt(&config->clk_gpio, GPIO_OUTPUT_INACTIVE) ||
-        gpio_pin_configure_dt(&config->reset_gpio, GPIO_OUTPUT_ACTIVE) ||
-        gpio_pin_configure_dt(&config->power_gpio, GPIO_OUTPUT_INACTIVE)) {
+        gpio_pin_configure_dt(&config->reset_gpio, GPIO_OUTPUT_ACTIVE)) {
         LOG_ERR("Failed to configure control GPIOs");
         return -EIO;
+    }
+    
+    // Initialize power GPIOs
+    for (int i = 0; i < config->power_gpio_count; i++) {
+        if (!gpio_is_ready_dt(&config->power_gpios[i])) {
+            LOG_ERR("Power GPIO %d not ready", i);
+            return -ENODEV;
+        }
+        
+        if (gpio_pin_configure_dt(&config->power_gpios[i], GPIO_OUTPUT_INACTIVE)) {
+            LOG_ERR("Failed to configure power GPIO %d", i);
+            return -EIO;
+        }
     }
     
     // Initialize row GPIOs as inputs with pull-up (since columns are active low)
@@ -369,12 +383,14 @@ static int kscan_74hc164_init(const struct device *dev) {
         return err;
     }
 #endif
+
+    // Turn on the matrix power initially
+    kscan_74hc164_power_control(dev, 1);
     
     // Reset the shift register and turn off the matrix initially
     gpio_pin_set_dt(&config->reset_gpio, 0);
     k_busy_wait(1);
     gpio_pin_set_dt(&config->reset_gpio, 1);
-    gpio_pin_set_dt(&config->power_gpio, 0);
     
     return 0;
 }
@@ -397,13 +413,16 @@ static int kscan_74hc164_pm_action(const struct device *dev, enum pm_device_acti
 #endif
         
         // Power off the matrix
-        gpio_pin_set_dt(&config->power_gpio, 0);
+        kscan_74hc164_power_control(dev, 0);
         
         // Disconnect GPIOs to save power
         gpio_pin_configure_dt(&config->data_gpio, GPIO_DISCONNECTED);
         gpio_pin_configure_dt(&config->clk_gpio, GPIO_DISCONNECTED);
         gpio_pin_configure_dt(&config->reset_gpio, GPIO_DISCONNECTED);
-        gpio_pin_configure_dt(&config->power_gpio, GPIO_DISCONNECTED);
+        
+        for (int i = 0; i < config->power_gpio_count; i++) {
+            gpio_pin_configure_dt(&config->power_gpios[i], GPIO_DISCONNECTED);
+        }
         
         for (int i = 0; i < config->row_count; i++) {
             gpio_pin_configure_dt(&config->row_gpios[i], GPIO_DISCONNECTED);
@@ -421,13 +440,19 @@ static int kscan_74hc164_pm_action(const struct device *dev, enum pm_device_acti
         ret = gpio_pin_configure_dt(&config->reset_gpio, GPIO_OUTPUT_ACTIVE);
         if (ret) return ret;
         
-        ret = gpio_pin_configure_dt(&config->power_gpio, GPIO_OUTPUT_INACTIVE);
-        if (ret) return ret;
+        // Re-initialize power GPIOs
+        for (int i = 0; i < config->power_gpio_count; i++) {
+            ret = gpio_pin_configure_dt(&config->power_gpios[i], GPIO_OUTPUT_INACTIVE);
+            if (ret) return ret;
+        }
         
         for (int i = 0; i < config->row_count; i++) {
             ret = gpio_pin_configure_dt(&config->row_gpios[i], GPIO_INPUT | GPIO_PULL_UP);
             if (ret) return ret;
         }
+
+        // Power off the matrix
+        kscan_74hc164_power_control(dev, 1);
         
         // Re-enable scanning which will set up interrupts if needed
         data->scan_enabled = true;
@@ -454,6 +479,10 @@ static const struct kscan_driver_api kscan_74hc164_api = {
         DT_FOREACH_PROP_ELEM_SEP(DT_DRV_INST(n), row_gpios, GPIO_DT_SPEC_GET_BY_IDX, (, )) \
     };                                                                                  \
                                                                                         \
+    static struct gpio_dt_spec power_gpios_##n[] = {                                    \
+        DT_FOREACH_PROP_ELEM_SEP(DT_DRV_INST(n), power_gpios, GPIO_DT_SPEC_GET_BY_IDX, (, )) \
+    };                                                                                  \
+                                                                                        \
     /* Statically allocate matrix state */                                              \
     static struct zmk_debounce_state matrix_state_##n[INST_MATRIX_LEN(n)];             \
                                                                                         \
@@ -465,7 +494,8 @@ static const struct kscan_driver_api kscan_74hc164_api = {
         .data_gpio = GPIO_DT_SPEC_INST_GET(n, data_gpios),                             \
         .clk_gpio = GPIO_DT_SPEC_INST_GET(n, clk_gpios),                               \
         .reset_gpio = GPIO_DT_SPEC_INST_GET(n, reset_gpios),                           \
-        .power_gpio = GPIO_DT_SPEC_INST_GET(n, power_gpios),                           \
+        .power_gpios = power_gpios_##n,                                                 \
+        .power_gpio_count = DT_INST_PROP_LEN(n, power_gpios),                          \
         .row_gpios = row_gpios_##n,                                                     \
         .row_count = DT_INST_PROP(n, rows),                                            \
         .col_count = DT_INST_PROP(n, columns),                                         \

@@ -23,7 +23,9 @@ properties:
   power-gpios:
     type: phandle-array
     required: true
-    description: GPIO for the power control pin
+    description: |
+      GPIOs for power control. Multiple GPIOs can be specified to
+      control power to different parts of the matrix.
 
   row-gpios:
     type: phandle-array
