@@ -3,6 +3,7 @@
 
 config ZMK_KSCAN_74HC164_MATRIX_DRIVER
 	bool "74HC164 shift register matrix driver"
+    select ZMK_DEBOUNCE
 	depends on DT_HAS_ZMK_KSCAN_74HC164_MATRIX_ENABLED
 	help
 	  Enable support for 74HC164 shift register matrix driver

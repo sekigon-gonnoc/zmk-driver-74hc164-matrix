@@ -18,6 +18,10 @@
 
 LOG_MODULE_REGISTER(kscan_74hc164_matrix, CONFIG_KSCAN_LOG_LEVEL);
 
+#define INST_ROWS_LEN(n) DT_INST_PROP(n, rows)
+#define INST_COLS_LEN(n) DT_INST_PROP(n, columns)
+#define INST_MATRIX_LEN(n) (INST_ROWS_LEN(n) * INST_COLS_LEN(n))
+
 #define INST_DEBOUNCE_PRESS_MS(n) \
     DT_INST_PROP_OR(n, debounce_press_ms, DT_INST_PROP_OR(n, debounce_period, 10))
 
@@ -282,11 +286,9 @@ static const struct kscan_driver_api kscan_74hc164_api = {
         DT_FOREACH_PROP_ELEM_SEP(DT_DRV_INST(n), row_gpios, GPIO_DT_SPEC_GET_BY_IDX, (, )) \
     };                                                                                  \
                                                                                         \
-    /* Define matrix length based on rows and columns */                                \
-    #define INST_MATRIX_LEN_##n (DT_INST_PROP(n, rows) * DT_INST_PROP(n, columns))     \
-                                                                                        \
     /* Statically allocate matrix state */                                              \
-    static struct zmk_debounce_state matrix_state_##n[INST_MATRIX_LEN_##n];            \
+    /* Using regular C comment instead of # preprocessor directive */                   \
+    static struct zmk_debounce_state matrix_state_##n[INST_MATRIX_LEN(n)];            \
                                                                                         \
     static const struct kscan_74hc164_config kscan_74hc164_config_##n = {              \
         .data_gpio = GPIO_DT_SPEC_INST_GET(n, data_gpios),                             \
